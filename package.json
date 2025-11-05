@@ -1,5 +1,5 @@
 {
-  "name": "@codedesign/vite-live-edit-plugin",
+  "name": "@codedesignapp/vite-live-edit-plugin",
   "version": "1.0.0",
   "description": "Vite plugin for live editing React components with AST-powered source mapping",
   "type": "module",
