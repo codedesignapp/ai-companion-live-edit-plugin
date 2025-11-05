@@ -1,0 +1,46 @@
+{
+  "name": "@codedesign/vite-live-edit-plugin",
+  "version": "1.0.0",
+  "description": "Vite plugin for live editing React components with AST-powered source mapping",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "vite",
+    "plugin",
+    "live-edit",
+    "react",
+    "ast",
+    "source-mapping",
+    "code-editing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codedesignapp/ai-companion-live-edit-plugin.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "vite": "^4.0.0 || ^5.0.0"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.28.4",
+    "@babel/traverse": "^7.28.4"
+  },
+  "devDependencies": {
+    "vite": "^4.5.0"
+  }
+}
