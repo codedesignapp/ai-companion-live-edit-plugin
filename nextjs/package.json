@@ -1,0 +1,49 @@
+{
+  "name": "@codedesignai/nextjs-live-edit-plugin",
+  "version": "1.0.3",
+  "description": "Next.js plugin for live editing React components with AST-powered source mapping",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./live-edit-handler": "./live-edit-handler.js",
+    "./source-mapper-loader": "./source-mapper-loader.js"
+  },
+  "files": [
+    "index.js",
+    "source-mapper-loader.js",
+    "live-edit-handler.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "nextjs",
+    "next",
+    "plugin",
+    "live-edit",
+    "react",
+    "ast",
+    "source-mapping",
+    "code-editing",
+    "webpack-loader"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codedesignapp/ai-companion-live-edit-plugin.git",
+    "directory": "nextjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "next": ">=13.0.0"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.28.4",
+    "@babel/traverse": "^7.28.4"
+  }
+}
