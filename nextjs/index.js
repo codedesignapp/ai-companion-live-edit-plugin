@@ -58,7 +58,6 @@ function withLiveEdit(nextConfig = {}, pluginOptions = {}) {
       ...existingExperimental,
       // Turbopack's persistent filesystem cache does not reliably invalidate
       // on overlayfs (Docker/ECS), causing stale SSR renders after file edits
-      turbopackFileSystemCacheForDev: false,
       // The HMR cache retains server component render results between refreshes,
       // preventing edited content from appearing on full-page loads
       serverComponentsHmrCache: false,
