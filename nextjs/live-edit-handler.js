@@ -9,54 +9,44 @@ const traverse = _traverse.default || _traverse;
 // ─── Cache Invalidation ─────────────────────────────────────────────────────
 
 /**
- * Force Turbopack server-side RSC cache invalidation.
+ * No-op — cache invalidation is now handled by scheduling a graceful
+ * process reload after each successful edit (see scheduleDevServerReload).
  *
- * Turbopack maintains separate caches for client HMR and server-side RSC
- * rendering. When we write to a source file via fs.writeFileSync(), the
- * file-system watcher triggers client HMR (so the browser updates), but the
- * server-side RSC cache is NOT always invalidated. This means subsequent
- * full-page requests (new tabs, refreshes) still render with old code,
- * causing hydration mismatches.
- *
- * Turbopack uses CONTENT HASHING — simply touching the file (updating mtime)
- * does NOT trigger a recompilation. We must actually change the file content.
- *
- * Strategy: toggle a harmless trailing comment in layout.tsx. This changes
- * the content hash, forcing Turbopack to recompile the entire server module
- * graph and clearing the stale RSC cache.
+ * On AWS ECS overlayfs, inotify events from Node.js fs.writeFileSync()
+ * are silently dropped, so neither the edited source file NOR a layout-toggle
+ * trick reliably triggers Turbopack recompilation. The only deterministic
+ * fix is a full process restart, which the sandbox command watcher handles
+ * in ~1 second.
  */
-const CACHE_BUST_MARKER = '/* live-edit-cache-bust */';
+function invalidateServerCache(/* projectRoot */) {
+  // Intentional no-op: handled by scheduleDevServerReload()
+}
 
-function invalidateServerCache(projectRoot) {
-  const layoutCandidates = [
-    path.resolve(projectRoot, 'app', 'layout.tsx'),
-    path.resolve(projectRoot, 'app', 'layout.jsx'),
-    path.resolve(projectRoot, 'app', 'layout.js'),
-  ];
-
-  for (const layoutPath of layoutCandidates) {
+/**
+ * Schedule a graceful dev server restart after the HTTP response has been sent.
+ *
+ * This is necessary because Turbopack's file watcher does not receive inotify
+ * events on Docker overlayfs (used by AWS ECS Fargate). Without a restart,
+ * Turbopack continues serving stale SSR output from its in-memory module cache
+ * even though the source file on disk has changed.
+ *
+ * The sandbox command watcher (/tmp/start_cmd.txt) detects the process exit
+ * and restarts the dev server within ~1 second. The browser's HMR client
+ * automatically reconnects and triggers a page refresh.
+ */
+function scheduleDevServerReload() {
+  setTimeout(() => {
+    console.log('🔄 Restarting dev server to flush Turbopack in-memory cache...');
     try {
-      if (fs.existsSync(layoutPath)) {
-        let content = fs.readFileSync(layoutPath, 'utf-8');
-
-        // Toggle the cache-bust marker: add if absent, remove if present.
-        // This ensures every edit produces a genuine content change.
-        if (content.includes(CACHE_BUST_MARKER)) {
-          content = content.replace(CACHE_BUST_MARKER, '');
-        } else {
-          content = content + '\n' + CACHE_BUST_MARKER + '\n';
-        }
-
-        fs.writeFileSync(layoutPath, content, 'utf-8');
-        console.log(`🔄 Toggled cache-bust marker in ${path.basename(layoutPath)} to invalidate server RSC cache`);
-        return;
-      }
+      // Signal the sandbox command watcher to restart the dev server
+      fs.writeFileSync('/tmp/start_cmd.txt',
+        'cd /root/project/code && NODE_ENV=development node node_modules/next/dist/bin/next dev -H 0.0.0.0 -p 5173\n/tmp/vite-server.log'
+      );
     } catch (e) {
-      console.warn(`⚠️ Could not modify ${path.basename(layoutPath)} for cache invalidation:`, e.message);
+      // Ignore — the watcher may not exist in non-sandbox environments
     }
-  }
-
-  console.warn('⚠️ No layout file found to invalidate server cache');
+    process.exit(0);
+  }, 500);
 }
 
 // ─── Utility Functions ──────────────────────────────────────────────────────
@@ -696,6 +686,10 @@ function createLiveEditHandler(options = {}) {
       const result = await handleEnhancedTextUpdate(data, handlerOptions);
 
       if (result.success) {
+        // Schedule a graceful restart AFTER sending the response so the client
+        // receives the 200 OK before the process exits
+        scheduleDevServerReload();
+
         return new Response(JSON.stringify({ success: true, message: result.message }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -762,6 +756,10 @@ function createPagesApiHandler(options = {}) {
       const result = await handleEnhancedTextUpdate(data, handlerOptions);
 
       if (result.success) {
+        // Schedule a graceful restart AFTER sending the response so the client
+        // receives the 200 OK before the process exits
+        scheduleDevServerReload();
+
         res.status(200).json({ success: true, message: result.message });
       } else {
         res.status(400).json({ success: false, error: result.error });

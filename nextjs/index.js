@@ -48,8 +48,21 @@ function withLiveEdit(nextConfig = {}, pluginOptions = {}) {
   // for React hydration to complete (which <Script strategy="afterInteractive"> depends on)
   const existingOrigins = nextConfig.allowedDevOrigins || [];
 
+  // Merge with existing experimental config — disable caching that prevents
+  // live-edit changes from being reflected in SSR output on overlayfs containers
+  const existingExperimental = nextConfig.experimental || {};
+
   return {
     ...nextConfig,
+    experimental: {
+      ...existingExperimental,
+      // Turbopack's persistent filesystem cache does not reliably invalidate
+      // on overlayfs (Docker/ECS), causing stale SSR renders after file edits
+      turbopackFileSystemCacheForDev: false,
+      // The HMR cache retains server component render results between refreshes,
+      // preventing edited content from appearing on full-page loads
+      serverComponentsHmrCache: false,
+    },
     allowedDevOrigins: [...existingOrigins, '*.miraqal.com', '*.codedesign.one', '*.cdsn.app'],
     turbopack: {
       ...existingTurbopack,
