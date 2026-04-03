@@ -9,44 +9,31 @@ const traverse = _traverse.default || _traverse;
 // ─── Cache Invalidation ─────────────────────────────────────────────────────
 
 /**
- * No-op — cache invalidation is now handled by scheduling a graceful
- * process reload after each successful edit (see scheduleDevServerReload).
+ * No-op — cache invalidation is handled by Turbopack's file-system polling.
  *
- * On AWS ECS overlayfs, inotify events from Node.js fs.writeFileSync()
- * are silently dropped, so neither the edited source file NOR a layout-toggle
- * trick reliably triggers Turbopack recompilation. The only deterministic
- * fix is a full process restart, which the sandbox command watcher handles
- * in ~1 second.
+ * On AWS ECS overlayfs, inotify events are silently dropped, so Turbopack's
+ * native file watcher never detects changes made by fs.writeFileSync().
+ * Instead, the dev server is started with WATCHPACK_POLLING=true, which makes
+ * Turbopack poll file modification timestamps on a timer. This reliably
+ * detects all file changes without requiring process restarts.
+ *
+ * Combined with experimental.serverComponentsHmrCache: false (injected by
+ * the withLiveEdit wrapper), both client HMR and server-side SSR will
+ * reflect the updated content within a few seconds of the file write.
  */
 function invalidateServerCache(/* projectRoot */) {
-  // Intentional no-op: handled by scheduleDevServerReload()
+  // No-op: WATCHPACK_POLLING + serverComponentsHmrCache: false handle this
 }
 
 /**
- * Schedule a graceful dev server restart after the HTTP response has been sent.
- *
- * This is necessary because Turbopack's file watcher does not receive inotify
- * events on Docker overlayfs (used by AWS ECS Fargate). Without a restart,
- * Turbopack continues serving stale SSR output from its in-memory module cache
- * even though the source file on disk has changed.
- *
- * The sandbox command watcher (/tmp/start_cmd.txt) detects the process exit
- * and restarts the dev server within ~1 second. The browser's HMR client
- * automatically reconnects and triggers a page refresh.
+ * No-op — previously restarted the dev server via process.exit(0), which
+ * caused visible 502 errors during the ~1-2s restart window. With
+ * WATCHPACK_POLLING=true, Turbopack detects file changes via timestamp
+ * polling, making process restarts unnecessary.
  */
 function scheduleDevServerReload() {
-  setTimeout(() => {
-    console.log('🔄 Restarting dev server to flush Turbopack in-memory cache...');
-    try {
-      // Signal the sandbox command watcher to restart the dev server
-      fs.writeFileSync('/tmp/start_cmd.txt',
-        'cd /root/project/code && NODE_ENV=development node node_modules/next/dist/bin/next dev -H 0.0.0.0 -p 5173\n/tmp/vite-server.log'
-      );
-    } catch (e) {
-      // Ignore — the watcher may not exist in non-sandbox environments
-    }
-    process.exit(0);
-  }, 500);
+  // No-op: polling-based file watching handles recompilation automatically
+  console.log('✅ File saved. Turbopack will detect the change via polling.');
 }
 
 // ─── Utility Functions ──────────────────────────────────────────────────────
