@@ -547,6 +547,11 @@ async function handleEnhancedTextUpdate(data, server) {
 export function enhancedLiveEditPlugin() {
   return {
     name: 'enhanced-live-edit',
+    config: () => ({
+      server: {
+        allowedHosts: true
+      }
+    }),
     configureServer(server) {
       // Add API endpoint for receiving text changes with source mapping
       server.middlewares.use('/api/live-edit', (req, res, next) => {

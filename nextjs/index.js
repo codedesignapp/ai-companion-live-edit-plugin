@@ -52,6 +52,10 @@ function withLiveEdit(nextConfig = {}, pluginOptions = {}) {
   // live-edit changes from being reflected in SSR output on overlayfs containers
   const existingExperimental = nextConfig.experimental || {};
 
+  // Merge rewrites — add sidecar proxy (/__sc → localhost:9960) so the backend
+  // can reach the sandbox-server through the ALB's public URL.
+  const existingRewrites = nextConfig.rewrites;
+
   return {
     ...nextConfig,
     experimental: {
@@ -63,6 +67,25 @@ function withLiveEdit(nextConfig = {}, pluginOptions = {}) {
       serverComponentsHmrCache: false,
     },
     allowedDevOrigins: [...existingOrigins, '*.miraqal.com', '*.codedesign.one', '*.cdsn.app'],
+    async rewrites() {
+      // Sidecar rewrite — always present
+      const sidecarRewrites = [
+        { source: '/__sc/:path*', destination: 'http://127.0.0.1:9960/:path*' },
+      ];
+      // Merge with user-defined rewrites (if any)
+      if (typeof existingRewrites === 'function') {
+        const userRewrites = await existingRewrites();
+        if (Array.isArray(userRewrites)) {
+          return [...sidecarRewrites, ...userRewrites];
+        }
+        // User returned { beforeFiles, afterFiles, fallback } shape
+        return {
+          ...userRewrites,
+          beforeFiles: [...sidecarRewrites, ...(userRewrites.beforeFiles || [])],
+        };
+      }
+      return sidecarRewrites;
+    },
     turbopack: {
       ...existingTurbopack,
       rules: {

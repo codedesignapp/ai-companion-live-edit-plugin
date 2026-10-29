@@ -22,18 +22,37 @@ const traverse = _traverse.default || _traverse;
  * reflect the updated content within a few seconds of the file write.
  */
 function invalidateServerCache(/* projectRoot */) {
-  // No-op: WATCHPACK_POLLING + serverComponentsHmrCache: false handle this
+  // No-op: handled by scheduleDevServerReload()
 }
 
 /**
- * No-op — previously restarted the dev server via process.exit(0), which
- * caused visible 502 errors during the ~1-2s restart window. With
- * WATCHPACK_POLLING=true, Turbopack detects file changes via timestamp
- * polling, making process restarts unnecessary.
+ * Schedule a graceful dev server restart after the HTTP response has been sent.
+ *
+ * Why this is needed: Turbopack maintains an in-memory server-side module cache
+ * that is completely separate from the client HMR cache. Even with
+ * WATCHPACK_POLLING=true and serverComponentsHmrCache: false, Turbopack
+ * recompiles the client bundle but keeps serving stale server-rendered HTML
+ * from its in-memory module cache. The only way to flush that cache is a
+ * process restart.
+ *
+ * The 2-second delay (vs the original 500ms) ensures:
+ * 1. The HTTP 200 response is fully sent to the client
+ * 2. The sandbox watchdog has time to restart the dev server (~1s)
+ * 3. The HMR WebSocket reconnect (which triggers a page reload in the browser)
+ *    hits a live server instead of a dead one, avoiding 502 errors
  */
 function scheduleDevServerReload() {
-  // No-op: polling-based file watching handles recompilation automatically
-  console.log('✅ File saved. Turbopack will detect the change via polling.');
+  setTimeout(() => {
+    console.log('🔄 Restarting dev server to flush server-side module cache...');
+    try {
+      fs.writeFileSync('/tmp/start_cmd.txt',
+        'cd /root/project/code && WATCHPACK_POLLING=true NODE_ENV=development node node_modules/next/dist/bin/next dev -H 0.0.0.0 -p 5173\n/tmp/vite-server.log'
+      );
+    } catch (e) {
+      // Ignore — the watcher may not exist in non-sandbox environments
+    }
+    process.exit(0);
+  }, 2000);
 }
 
 // ─── Utility Functions ──────────────────────────────────────────────────────
