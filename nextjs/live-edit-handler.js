@@ -90,6 +90,67 @@ function getLineAndCharPosition(content, charPosition) {
  * Validate that the location data is correct in the current source file.
  * Performs bounds checking, text matching, and AST-level verification.
  */
+/**
+ * Template content regions (see source-mapper-loader) name the entry they were
+ * built from. Find that entry's value literal in the current file, so an edit
+ * still lands after other entries in the file changed length. Returns
+ * { start, end, text } or null.
+ */
+function locateContentValue(originalContent, location) {
+  let ast;
+  try {
+    ast = parser.parse(originalContent, { sourceType: 'module', plugins: ['jsx', 'typescript'] });
+  } catch {
+    return null;
+  }
+  const unwrap = (node) => {
+    while (node && ['TSAsExpression', 'TSSatisfiesExpression', 'TSTypeAssertion', 'ParenthesizedExpression'].includes(node.type)) {
+      node = node.expression;
+    }
+    return node;
+  };
+  const keyName = (prop) => {
+    if (!prop || prop.type !== 'ObjectProperty' || prop.computed) return null;
+    if (prop.key.type === 'StringLiteral') return prop.key.value;
+    if (prop.key.type === 'Identifier') return prop.key.name;
+    return null;
+  };
+  for (const stmt of ast.program.body) {
+    const decl = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
+    if (!decl || decl.type !== 'VariableDeclaration') continue;
+    for (const declarator of decl.declarations) {
+      if (declarator.id.type !== 'Identifier' || declarator.id.name !== location.contentObject) continue;
+      const obj = unwrap(declarator.init);
+      if (!obj || obj.type !== 'ObjectExpression') continue;
+      const entry = obj.properties.find((prop) => keyName(prop) === location.contentKey);
+      const entryObj = entry ? unwrap(entry.value) : null;
+      if (!entryObj || entryObj.type !== 'ObjectExpression') return null;
+      const valueProp = entryObj.properties.find((prop) => keyName(prop) === 'value');
+      const value = valueProp ? valueProp.value : null;
+      if (value && value.type === 'StringLiteral') {
+        return { start: value.start + 1, end: value.end - 1, text: originalContent.slice(value.start + 1, value.end - 1) };
+      }
+      if (value && value.type === 'TemplateLiteral' && value.expressions.length === 0 && value.quasis.length === 1) {
+        const quasi = value.quasis[0];
+        return { start: quasi.start, end: quasi.end, text: originalContent.slice(quasi.start, quasi.end) };
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Text going into a string literal must keep it a valid literal: escape the
+ * delimiter, backslashes and line breaks (a quote in the new text used to make
+ * the save fail as a syntax error).
+ */
+function escapeForLiteral(text, delimiter) {
+  let out = text.replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n');
+  if (delimiter === '`') return out.replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+  return out.split(delimiter).join('\\' + delimiter);
+}
+
 function validateLocationInSource(originalContent, location) {
   // 1. Basic bounds checking
   if (location.start < 0 || location.end < 0) {
@@ -122,6 +183,31 @@ function validateLocationInSource(originalContent, location) {
 
   // 3. AST verification based on type
   const locationType = location.type || 'text-content';
+
+  // Template content regions were just re-found by key (locateContentValue).
+  if (location.contentKey) {
+    return { valid: true };
+  }
+
+  // Module constant / data array literals: any string or static template literal
+  // spanning exactly this range.
+  if (location.anywhere) {
+    let found = false;
+    try {
+      traverse(parser.parse(originalContent, { sourceType: 'module', plugins: ['jsx', 'typescript'] }), {
+        StringLiteral(astPath) {
+          if (astPath.node.start + 1 === location.start && astPath.node.end - 1 === location.end) { found = true; astPath.stop(); }
+        },
+        TemplateLiteral(astPath) {
+          const q = astPath.node.quasis;
+          if (astPath.node.expressions.length === 0 && q.length === 1 && q[0].start === location.start && q[0].end === location.end) { found = true; astPath.stop(); }
+        },
+      });
+    } catch (parseError) {
+      return { valid: false, error: `Source file has syntax errors: ${parseError.message}` };
+    }
+    return found ? { valid: true } : { valid: false, error: `AST mismatch: no string literal at position ${location.start}-${location.end}.` };
+  }
 
   try {
     const ast = parser.parse(originalContent, {
@@ -430,6 +516,16 @@ async function handleEnhancedTextUpdate(data, options = {}) {
       .filter(r => TEXT_TYPES.includes(r.type))
       .sort((a, b) => a.start - b.start);
 
+    // A template content region lives in a content object, not next to the
+    // element's other text, so a multi-region span replacement across them would
+    // overwrite the code in between. Such mixed elements are left to the AI.
+    if (textRegions.length > 1 && textRegions.some((r) => r.contentKey || r.anywhere)) {
+      return {
+        success: false,
+        error: 'This text combines template content with other text and cannot be edited directly',
+      };
+    }
+
     // Determine if this is a multi-region text update:
     // - updateType is 'text' (or locationType is text-like)
     // - Element has more than one text region
@@ -470,6 +566,20 @@ async function handleEnhancedTextUpdate(data, options = {}) {
     // === READ & BACKUP ORIGINAL ===
     originalContent = fs.readFileSync(fullFilePath, 'utf-8');
 
+    if (location.contentKey) {
+      const found = locateContentValue(originalContent, location);
+      if (!found) {
+        return { success: false, error: `Content entry "${location.contentKey}" not found in ${location.file}` };
+      }
+      location = { ...location, ...found };
+    }
+    // Delimiter of the string literal being edited ('"', "'" or '`'), if any.
+    // (Content-key and module-constant regions are literals; JSX ones may be too.)
+    const literalDelimiter = ['"', "'", '`'].includes(originalContent[location.start - 1])
+      && ['string-expression', 'template-literal', 'image-src', 'style-background-image'].includes(locationType)
+      ? originalContent[location.start - 1]
+      : null;
+
     // === EXTRACT NEW CONTENT ===
     let newContent;
 
@@ -501,7 +611,7 @@ async function handleEnhancedTextUpdate(data, options = {}) {
 
       const updatedContent =
         originalContent.substring(0, location.start) +
-        newContent +
+        (literalDelimiter && (location.contentKey || location.anywhere) ? escapeForLiteral(newContent, literalDelimiter) : newContent) +
         originalContent.substring(location.end);
 
       const postValidation = validateUpdatedContent(updatedContent, fullFilePath);
@@ -594,6 +704,8 @@ async function handleEnhancedTextUpdate(data, options = {}) {
         const leadingWs = originalNodeText.match(/^(\s*)/)[1];
         const trailingWs = originalNodeText.match(/(\s*)$/)[1];
         newContent = leadingWs + newContent.trim() + trailingWs;
+      } else if (literalDelimiter && (locationType === 'string-expression' || locationType === 'template-literal')) {
+        newContent = escapeForLiteral(newContent, literalDelimiter);
       }
 
       updatedContent =

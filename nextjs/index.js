@@ -67,6 +67,9 @@ function withLiveEdit(nextConfig = {}, pluginOptions = {}) {
       serverComponentsHmrCache: false,
     },
     allowedDevOrigins: [...existingOrigins, '*.miraqal.com', '*.codedesign.one', '*.cdsn.app'],
+    // The site runs inside the editor's canvas: Next's dev badge ("1 Issue")
+    // sat on top of the customer's page whenever anything logged an error.
+    devIndicators: false,
     async rewrites() {
       // Sidecar rewrite — always present
       const sidecarRewrites = [

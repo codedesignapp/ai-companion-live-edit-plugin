@@ -1,6 +1,6 @@
 {
   "name": "@codedesignai/nextjs-live-edit-plugin",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Next.js plugin for live editing React components with AST-powered source mapping",
   "main": "index.js",
   "exports": {
